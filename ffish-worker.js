@@ -3,9 +3,10 @@
  * 解决 ffish.Board is not a constructor 问题
  * 
  * 修改说明：
- * 1. 添加了 Board 类存在性检查
- * 2. 改进了错误处理，确保能正确报告问题
- * 3. 如果 Board 不可用，会返回明确的错误信息
+ * 1. 优先使用 importScripts 加载 UMD 模块（Worker 环境推荐）
+ * 2. 清空全局变量避免干扰
+ * 3. 保留动态 import 作为备用方案
+ * 4. 改进错误处理
  */
 
 // 获取当前Worker文件所在目录
@@ -24,13 +25,14 @@ let boardClass = null; // 缓存 Board 类
 
 /**
  * 动态加载ffish.js（UMD格式兼容方式）
+ * 修复：优先使用 importScripts 加载 UMD 模块
  */
 async function loadFfishModule() {
+    // 方案1: 使用 importScripts 加载 UMD 模块（Worker 环境推荐）
     try {
-        // 方案1: 使用 importScripts 加载 UMD 模块（Worker 环境推荐）
         console.log('[ffish Worker] 尝试使用 importScripts 加载...');
         
-        // 清空可能存在的全局 Module
+        // 清空可能存在的全局 Module，避免旧数据干扰
         self.Module = undefined;
         self.ffish = undefined;
         
@@ -49,7 +51,7 @@ async function loadFfishModule() {
         console.error('[ffish Worker] importScripts 加载失败:', error);
     }
     
-    // 方案2: 尝试使用动态 import（ES6模块方式）
+    // 方案2: 尝试使用动态 import（ES6模块方式）作为备用
     try {
         console.log('[ffish Worker] 尝试使用动态 import 加载...');
         const ffishModule = await import(FFISH_BASE_PATH + 'ffish.js');

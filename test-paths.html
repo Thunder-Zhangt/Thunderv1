@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>路径测试 - 雷霆中国象棋</title>
+    <style>
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #fff;
+        }
+        h1 {
+            text-align: center;
+            color: #a5f3fc;
+        }
+        .test-section {
+            background: rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .test-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            margin: 10px 0;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+        }
+        .status {
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+        }
+        .status.pending { background: #fbbf24; color: #000; }
+        .status.success { background: #22c55e; color: #fff; }
+        .status.error { background: #ef4444; color: #fff; }
+        .path {
+            font-family: monospace;
+            font-size: 12px;
+            color: #94a3b8;
+            word-break: break-all;
+        }
+        button {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            display: block;
+            margin: 20px auto;
+        }
+        button:hover {
+            background: linear-gradient(135deg, #60a5fa, #3b82f6);
+        }
+        .info {
+            background: rgba(59, 130, 246, 0.2);
+            border-left: 4px solid #3b82f6;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .console-log {
+            background: #0f172a;
+            border-radius: 8px;
+            padding: 15px;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+        .console-log div {
+            margin: 5px 0;
+            padding: 3px 0;
+            border-bottom: 1px solid #1e293b;
+        }
+        .console-log .error { color: #ef4444; }
+        .console-log .success { color: #22c55e; }
+        .console-log .info { color: #60a5fa; background: transparent; border: none; padding: 0; margin: 0;}
+    </style>
+</head>
+<body>
+    <h1>🔧 雷霆中国象棋 - 路径测试工具</h1>
+    
+    <div class="info">
+        <strong>当前页面路径：</strong> <span id="current-path"></span><br>
+        <strong>预期Worker路径：</strong> <span id="worker-path"></span><br>
+        <strong>预期ffish.js路径：</strong> <span id="ffish-path"></span>
+    </div>
+
+    <div class="test-section">
+        <h2>📁 文件存在性测试</h2>
+        <div id="file-tests"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>⚙️ Worker 加载测试</h2>
+        <div id="worker-test">
+            <div class="test-item">
+                <span>Worker 初始化</span>
+                <span class="status pending">待测试</span>
+            </div>
+        </div>
+    </div>
+
+    <button onclick="runAllTests()">🚀 运行所有测试</button>
+
+    <div class="console-log" id="console-log">
+        <div class="info">点击按钮开始测试...</div>
+    </div>
+
+    <script>
+        const currentPath = window.location.pathname;
+        const basePath = currentPath.substring(0, currentPath.lastIndexOf('/') + 1);
+        
+        document.getElementById('current-path').textContent = currentPath;
+        document.getElementById('worker-path').textContent = basePath + 'ffish-worker.js';
+        document.getElementById('ffish-path').textContent = basePath + 'js/ffish.js';
+
+        function log(message, type = 'info') {
+            const consoleDiv = document.getElementById('console-log');
+            const div = document.createElement('div');
+            div.className = type;
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            consoleDiv.appendChild(div);
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+        }
+
+        const filesToTest = [
+            { name: 'index.html', path: basePath + 'index.html' },
+            { name: 'style.css', path: basePath + 'style.css' },
+            { name: 'script.js', path: basePath + 'script.js' },
+            { name: 'ai-engine.js', path: basePath + 'ai-engine.js' },
+            { name: 'opening-book.js', path: basePath + 'opening-book.js' },
+            { name: 'ffish-worker.js', path: basePath + 'ffish-worker.js' },
+            { name: 'js/ffish.js', path: basePath + 'js/ffish.js' },
+            { name: 'js/ffish.wasm', path: basePath + 'js/ffish.wasm' }
+        ];
+
+        async function testFile(file) {
+            try {
+                const response = await fetch(file.path, { method: 'HEAD' });
+                return {
+                    name: file.name,
+                    path: file.path,
+                    status: response.status,
+                    ok: response.ok
+                };
+            } catch (error) {
+                return {
+                    name: file.name,
+                    path: file.path,
+                    status: 'Error',
+                    ok: false,
+                    error: error.message
+                };
+            }
+        }
+
+        async function runFileTests() {
+            const container = document.getElementById('file-tests');
+            container.innerHTML = '';
+            
+            log('开始测试文件存在性...');
+            
+            for (const file of filesToTest) {
+                const result = await testFile(file);
+                const div = document.createElement('div');
+                div.className = 'test-item';
+                div.innerHTML = `
+                    <div>
+                        <strong>${result.name}</strong>
+                        <div class="path">${result.path}</div>
+                    </div>
+                    <span class="status ${result.ok ? 'success' : 'error'}">
+                        ${result.ok ? '✅ 存在' : '❌ ' + (result.status === 404 ? '404' : result.status)}
+                    </span>
+                `;
+                container.appendChild(div);
+                
+                if (result.ok) {
+                    log(`✅ ${result.name} 存在`, 'success');
+                } else {
+                    log(`❌ ${result.name} 不存在 (${result.status})`, 'error');
+                }
+            }
+        }
+
+        async function testWorker() {
+            const container = document.getElementById('worker-test');
+            container.innerHTML = '';
+            
+            log('开始测试 Worker 加载...');
+            
+            try {
+                const worker = new Worker(basePath + 'ffish-worker.js');
+                
+                const initDiv = document.createElement('div');
+                initDiv.className = 'test-item';
+                initDiv.innerHTML = `
+                    <span>Worker 初始化</span>
+                    <span class="status success">✅ 成功</span>
+                `;
+                container.appendChild(initDiv);
+                log('✅ Worker 初始化成功', 'success');
+                
+                return new Promise((resolve) => {
+                    const timeout = setTimeout(() => {
+                        const timeoutDiv = document.createElement('div');
+                        timeoutDiv.className = 'test-item';
+                        timeoutDiv.innerHTML = `
+                            <span>ffish 引擎初始化</span>
+                            <span class="status error">❌ 超时</span>
+                        `;
+                        container.appendChild(timeoutDiv);
+                        log('❌ ffish 引擎初始化超时', 'error');
+                        resolve(false);
+                    }, 10000);
+                    
+                    worker.onmessage = (e) => {
+                        clearTimeout(timeout);
+                        const { type, error } = e.data;
+                        
+                        if (type === 'ready') {
+                            const readyDiv = document.createElement('div');
+                            readyDiv.className = 'test-item';
+                            readyDiv.innerHTML = `
+                                <span>ffish 引擎初始化</span>
+                                <span class="status success">✅ 成功</span>
+                            `;
+                            container.appendChild(readyDiv);
+                            log('✅ ffish 引擎初始化成功', 'success');
+                            resolve(true);
+                        } else if (type === 'error') {
+                            const errorDiv = document.createElement('div');
+                            errorDiv.className = 'test-item';
+                            errorDiv.innerHTML = `
+                                <span>ffish 引擎初始化</span>
+                                <span class="status error">❌ ${error || '失败'}</span>
+                            `;
+                            container.appendChild(errorDiv);
+                            log(`❌ ffish 引擎初始化失败: ${error}`, 'error');
+                            resolve(false);
+                        }
+                    };
+                    
+                    worker.onerror = (error) => {
+                        clearTimeout(timeout);
+                        const errorDiv = document.createElement('div');
+                        errorDiv.className = 'test-item';
+                        errorDiv.innerHTML = `
+                            <span>ffish 引擎初始化</span>
+                            <span class="status error">❌ ${error.message || 'Worker错误'}</span>
+                        `;
+                        container.appendChild(errorDiv);
+                        log(`❌ Worker 错误: ${error.message}`, 'error');
+                        resolve(false);
+                    };
+                });
+            } catch (error) {
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'test-item';
+                errorDiv.innerHTML = `
+                    <span>Worker 初始化</span>
+                    <span class="status error">❌ ${error.message}</span>
+                `;
+                container.appendChild(errorDiv);
+                log(`❌ Worker 初始化失败: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        async function runAllTests() {
+            document.getElementById('console-log').innerHTML = '';
+            log('🚀 开始运行所有测试...');
+            
+            await runFileTests();
+            await testWorker();
+            
+            log('✅ 所有测试完成');
+        }
+    </script>
+</body>
+</html>

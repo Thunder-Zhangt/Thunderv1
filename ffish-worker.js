@@ -1,6 +1,6 @@
 /**
- * ffish Worker - 修复版
- * 解决 WASM 路径加载问题
+ * ffish Worker - 终极修复版
+ * 解决动态 import 模块作用域隔离问题
  */
 
 const WORKER_PATH = self.location.pathname;
@@ -11,78 +11,141 @@ console.log('[ffish Worker] Worker路径:', WORKER_PATH);
 console.log('[ffish Worker] 基础路径:', BASE_PATH);
 console.log('[ffish Worker] JS路径:', FFISH_BASE_PATH);
 
-// ==================== 关键修复：预定义 Module 配置 ====================
-// 在加载 ffish.js 之前设置 locateFile，确保 WASM 从正确路径加载
-self.Module = {
-    locateFile: function(path) {
-        console.log('[ffish Worker] locateFile 请求:', path);
-        if (path.endsWith('.wasm')) {
-            // WASM 文件在 js/ 目录下
-            const wasmPath = FFISH_BASE_PATH + path;
-            console.log('[ffish Worker] WASM 路径修正为:', wasmPath);
-            return wasmPath;
-        }
-        return path;
-    },
-    // 添加错误处理
-    onAbort: function(what) {
-        console.error('[ffish Worker] Module abort:', what);
-    },
-    onRuntimeInitialized: function() {
-        console.log('[ffish Worker] Module runtime initialized');
-    }
-};
-// =====================================================================
-
 let currentBoard = null;
 let isInitialized = false;
+let initError = null;
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
- * 等待 ffish 全局变量可用
+ * 加载 ffish.js 并在全局作用域执行
+ * 关键：使用 fetch + eval 确保 Module 是全局变量
  */
-async function waitForFfishGlobal() {
-    console.log('[ffish Worker] 等待 ffish 全局变量...');
+async function loadFfishScript() {
+    console.log('[ffish Worker] 开始加载 ffish.js...');
+    
+    // ==================== 关键修复：预定义全局 Module ====================
+    // 必须在加载 ffish.js 之前设置，这样 ffish.js 会检测到并使用它
+    self.Module = {
+        // 关键：设置正确的脚本目录，这样 locateFile 的第二个参数才正确
+        scriptDirectory: FFISH_BASE_PATH,
+        
+        // 关键：自定义 locateFile 函数，修正 WASM 路径
+        locateFile: function(filename, scriptDir) {
+            console.log('[ffish Worker] locateFile 被调用:');
+            console.log('  - 请求文件:', filename);
+            console.log('  - scriptDir:', scriptDir);
+            
+            if (filename.endsWith('.wasm')) {
+                // WASM 文件在 js/ 目录下
+                const wasmPath = FFISH_BASE_PATH + filename;
+                console.log('  - 修正为:', wasmPath);
+                return wasmPath;
+            }
+            
+            // 其他文件使用默认路径
+            return (scriptDir || FFISH_BASE_PATH) + filename;
+        },
+        
+        // 调试回调
+        onRuntimeInitialized: function() {
+            console.log('[ffish Worker] ✅ Module runtime initialized');
+        },
+        
+        onAbort: function(what) {
+            console.error('[ffish Worker] ❌ Module abort:', what);
+            initError = what;
+        },
+        
+        // 打印调试信息
+        print: function(text) {
+            console.log('[ffish.js]', text);
+        },
+        printErr: function(text) {
+            console.error('[ffish.js]', text);
+        }
+    };
+    // =====================================================================
+    
+    try {
+        // 方法：fetch + eval 在全局作用域执行
+        // 这样 ffish.js 中的 `var Module` 会引用到全局的 self.Module
+        console.log('[ffish Worker] 从路径获取:', FFISH_BASE_PATH + 'ffish.js');
+        
+        const response = await fetch(FFISH_BASE_PATH + 'ffish.js');
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const scriptText = await response.text();
+        console.log('[ffish Worker] 获取成功，脚本大小:', scriptText.length, '字节');
+        
+        // 在全局作用域执行脚本
+        // 使用 self.eval 确保在 WorkerGlobalScope 中执行
+        console.log('[ffish Worker] 在全局作用域执行脚本...');
+        self.eval(scriptText);
+        
+        console.log('[ffish Worker] 脚本执行完成');
+        console.log('[ffish Worker] self.Module 类型:', typeof self.Module);
+        console.log('[ffish Worker] self.Module.Board 类型:', typeof self.Module.Board);
+        
+        // 检查是否成功
+        if (typeof self.Module.Board === 'function') {
+            console.log('[ffish Worker] ✅ ffish.js 加载成功，Board 类已就绪');
+            return true;
+        } else {
+            // 可能需要等待 WASM 初始化
+            console.log('[ffish Worker] Board 类尚未就绪，等待 WASM 初始化...');
+            return false;
+        }
+        
+    } catch (error) {
+        console.error('[ffish Worker] 加载失败:', error);
+        throw error;
+    }
+}
+
+/**
+ * 等待 ffish 初始化完成（WASM 加载完毕）
+ */
+async function waitForFfishInit() {
+    console.log('[ffish Worker] 等待 ffish 初始化...');
     
     let attempts = 0;
-    const maxAttempts = 150; // 15秒
+    const maxAttempts = 200; // 20秒
     
     while (attempts < maxAttempts) {
-        // 检查各种可能的全局变量名
-        const possibleGlobals = ['ffish', 'Module', 'FFISH'];
+        // 检查 Module 和 Board 是否就绪
+        if (self.Module && typeof self.Module.Board === 'function') {
+            console.log(`[ffish Worker] ✅ ffish 初始化完成 (尝试 ${attempts} 次)`);
+            return true;
+        }
         
-        for (const name of possibleGlobals) {
-            if (self[name] && typeof self[name] === 'object') {
-                console.log(`[ffish Worker] 找到全局变量: self.${name}`);
-                
-                // 检查是否有 Board
-                if (typeof self[name].Board === 'function') {
-                    console.log(`[ffish Worker] Board 类在 self.${name} 中`);
-                    self.ffishModule = self[name];
-                    return true;
-                }
-                
-                // 检查 asm
-                if (self[name].asm && typeof self[name].asm.Board === 'function') {
-                    console.log(`[ffish Worker] Board 类在 self.${name}.asm 中`);
-                    self.ffishModule = self[name];
-                    self.ffishModule.Board = self[name].asm.Board;
-                    return true;
-                }
-            }
+        // 检查是否有错误
+        if (initError) {
+            console.error('[ffish Worker] 初始化过程中出错:', initError);
+            return false;
         }
         
         attempts++;
-        if (attempts % 10 === 0) {
+        if (attempts % 20 === 0) {
             console.log(`[ffish Worker] 等待中... (${attempts}/${maxAttempts})`);
+            // 输出当前状态
+            console.log('  - self.Module:', typeof self.Module);
+            if (self.Module) {
+                console.log('  - self.Module.Board:', typeof self.Module.Board);
+                console.log('  - self.Module.asm:', typeof self.Module.asm);
+                console.log('  - self.Module.ready:', typeof self.Module.ready);
+            }
         }
         
         await sleep(100);
     }
     
+    console.error('[ffish Worker] 等待超时');
     return false;
 }
 
@@ -91,57 +154,36 @@ async function waitForFfishGlobal() {
  */
 async function initFfish() {
     if (isInitialized) return Promise.resolve();
+    if (initError) return Promise.reject(new Error('初始化已失败: ' + initError));
     
     return new Promise(async (resolve, reject) => {
         try {
-            console.log('[ffish Worker] 尝试加载 ffish.js...');
-            console.log('[ffish Worker] 从路径加载:', FFISH_BASE_PATH + 'ffish.js');
+            // 加载脚本
+            const loaded = await loadFfishScript();
             
-            // 方法1: 使用 importScripts (同步加载)
-            try {
-                importScripts(FFISH_BASE_PATH + 'ffish.js');
-                console.log('[ffish Worker] importScripts 成功');
-            } catch (e) {
-                console.log('[ffish Worker] importScripts 失败:', e.message);
+            if (!loaded) {
+                // 需要等待初始化完成
+                const success = await waitForFfishInit();
                 
-                // 方法2: 使用动态 import
-                try {
-                    const mod = await import(FFISH_BASE_PATH + 'ffish.js');
-                    console.log('[ffish Worker] 动态 import 成功');
-                    
-                    // 将 default 导出挂载到全局
-                    if (mod.default) {
-                        Object.assign(self.Module, mod.default);
-                    }
-                } catch (e2) {
-                    console.error('[ffish Worker] 动态 import 也失败:', e2.message);
-                    reject(new Error('无法加载 ffish.js: ' + e2.message));
+                if (!success) {
+                    reject(new Error('ffish 引擎初始化失败或超时'));
                     return;
                 }
             }
             
-            // 等待 ffish 初始化
-            const success = await waitForFfishGlobal();
-            
-            if (success) {
-                isInitialized = true;
-                console.log('[ffish Worker] ✅ ffish 引擎初始化完成');
-                resolve();
-            } else {
-                // 输出调试信息
-                console.log('[ffish Worker] ❌ 调试信息:');
-                console.log('  self.ffish:', typeof self.ffish);
-                console.log('  self.Module:', typeof self.Module);
-                console.log('  self.FFISH:', typeof self.FFISH);
-                if (self.Module) {
-                    console.log('  self.Module.Board:', typeof self.Module.Board);
-                    console.log('  self.Module.asm:', typeof self.Module.asm);
-                }
-                
-                reject(new Error('ffish 引擎初始化超时'));
+            // 验证 Board 类
+            if (typeof self.Module.Board !== 'function') {
+                reject(new Error('Board 类不可用'));
+                return;
             }
+            
+            isInitialized = true;
+            console.log('[ffish Worker] ✅ ffish 引擎初始化完成');
+            resolve();
+            
         } catch (error) {
             console.error('[ffish Worker] 初始化错误:', error);
+            initError = error.message;
             reject(error);
         }
     });
@@ -151,22 +193,24 @@ async function initFfish() {
  * 创建象棋棋盘
  */
 function createBoard(fen = null) {
-    if (!isInitialized || !self.ffishModule || typeof self.ffishModule.Board !== 'function') {
+    if (!isInitialized || !self.Module || typeof self.Module.Board !== 'function') {
         throw new Error('ffish 引擎尚未初始化');
     }
 
     // 删除旧棋盘
     if (currentBoard) {
-        currentBoard.delete();
+        try {
+            currentBoard.delete();
+        } catch (e) {}
         currentBoard = null;
     }
 
     // 创建新棋盘
     try {
         if (fen) {
-            currentBoard = new self.ffishModule.Board("xiangqi", fen);
+            currentBoard = new self.Module.Board("xiangqi", fen);
         } else {
-            currentBoard = new self.ffishModule.Board("xiangqi");
+            currentBoard = new self.Module.Board("xiangqi");
         }
         return currentBoard;
     } catch (error) {
@@ -221,7 +265,7 @@ async function searchBestMove(fen, timeMs) {
  */
 async function evaluateMove(board, move, timePerMove) {
     try {
-        const testBoard = new self.ffishModule.Board("xiangqi", board.fen());
+        const testBoard = new self.Module.Board("xiangqi", board.fen());
         testBoard.push(move);
         
         let score = Math.random() * 100;
@@ -268,7 +312,7 @@ function validateFen(fen) {
     if (!isInitialized) throw new Error('ffish 引擎尚未初始化');
     
     try {
-        const result = self.ffishModule.validateFen(fen);
+        const result = self.Module.validateFen(fen);
         return result === 1;
     } catch (error) {
         return false;
@@ -354,11 +398,14 @@ self.onmessage = async function(e) {
 
             case 'terminate':
                 if (currentBoard) {
-                    currentBoard.delete();
+                    try {
+                        currentBoard.delete();
+                    } catch (e) {}
                     currentBoard = null;
                 }
                 isInitialized = false;
-                self.ffishModule = null;
+                initError = null;
+                self.Module = null;
                 self.postMessage({ type: 'terminated', id });
                 break;
 

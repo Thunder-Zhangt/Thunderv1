@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中国象棋 - 雷霆AI</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♟️</text></svg>">
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Ma+Shan+Zheng&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <style>
+        /* 评论系统样式 */
+        .comment-section {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background: rgba(30, 41, 59, 0.8);
+            border-radius: 20px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(59, 130, 246, 0.2);
+            backdrop-filter: blur(10px);
+        }
+        
+        .comment-section h2 {
+            color: #60a5fa;
+            margin-bottom: 1.5rem;
+            font-size: 1.6rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .comment-list {
+            max-height: 400px;
+            overflow-y: auto;
+            margin-bottom: 1.5rem;
+            padding-right: 0.5rem;
+        }
+        
+        .comment-list::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .comment-list::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.3);
+            border-radius: 3px;
+        }
+        
+        .comment-list::-webkit-scrollbar-thumb {
+            background: rgba(59, 130, 246, 0.5);
+            border-radius: 3px;
+        }
+        
+        .comment-item {
+            display: flex;
+            gap: 1rem;
+            padding: 1rem;
+            background: rgba(15, 23, 42, 0.4);
+            border-radius: 12px;
+            margin-bottom: 0.8rem;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            transition: all 0.3s ease;
+        }
+        
+        .comment-item:hover {
+            background: rgba(15, 23, 42, 0.6);
+            transform: translateX(5px);
+        }
+        
+        .comment-avatar {
+            flex-shrink: 0;
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+        }
+        
+        .comment-avatar .avatar-piece {
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Ma Shan Zheng', cursive;
+            font-size: 1.4rem;
+            font-weight: bold;
+            box-shadow: 0 3px 8px rgba(0, 0, 0, 0.4), inset 0 1px 3px rgba(255, 255, 255, 0.3);
+        }
+        
+        .comment-avatar .avatar-piece.red {
+            color: #dc2626;
+            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.5), -1px -1px 1px rgba(255, 255, 255, 0.3);
+            background: radial-gradient(circle at 30% 30%, #fca5a5, #dc2626);
+            border: 2px solid #ef4444;
+        }
+        
+        .comment-avatar .avatar-piece.black {
+            color: #1e293b;
+            text-shadow: 1px 1px 3px rgba(255, 255, 255, 0.3), -1px -1px 1px rgba(0, 0, 0, 0.5);
+            background: radial-gradient(circle at 30% 30%, #cbd5e1, #1e293b);
+            border: 2px solid #475569;
+        }
+        
+        .comment-content {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .comment-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.4rem;
+            flex-wrap: wrap;
+        }
+        
+        .comment-name {
+            color: #60a5fa;
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+        
+        .comment-gender {
+            display: flex;
+            align-items: center;
+        }
+        
+        .comment-gender .male-icon {
+            color: #3b82f6;
+            font-size: 0.9rem;
+        }
+        
+        .comment-gender .female-icon {
+            color: #ec4899;
+            font-size: 0.9rem;
+        }
+        
+        .comment-time {
+            color: #64748b;
+            font-size: 0.8rem;
+            margin-left: auto;
+        }
+        
+        .comment-text {
+            color: #cbd5e1;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            word-break: break-word;
+        }
+        
+        .comment-input-area {
+            background: rgba(15, 23, 42, 0.5);
+            border-radius: 12px;
+            padding: 1rem;
+            border: 1px solid rgba(59, 130, 246, 0.2);
+        }
+        
+        .comment-input-row {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 0.8rem;
+            flex-wrap: wrap;
+        }
+        
+        .comment-avatar-selector {
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        .avatar-option {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+            background: rgba(51, 65, 85, 0.5);
+        }
+        
+        .avatar-option:hover {
+            background: rgba(71, 85, 105, 0.7);
+        }
+        
+        .avatar-option.active {
+            border-color: #3b82f6;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+        }
+        
+        .avatar-option .avatar-piece {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Ma Shan Zheng', cursive;
+            font-size: 1.1rem;
+            font-weight: bold;
+        }
+        
+        .avatar-option .avatar-piece.red {
+            color: #dc2626;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+            background: radial-gradient(circle at 30% 30%, #fca5a5, #dc2626);
+            border: 2px solid #ef4444;
+        }
+        
+        .avatar-option .avatar-piece.black {
+            color: #1e293b;
+            text-shadow: 1px 1px 2px rgba(255, 255, 255, 0.3);
+            background: radial-gradient(circle at 30% 30%, #cbd5e1, #1e293b);
+            border: 2px solid #475569;
+        }
+        
+        .comment-gender-selector {
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        .gender-option {
+            cursor: pointer;
+        }
+        
+        .gender-option input {
+            display: none;
+        }
+        
+        .gender-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(51, 65, 85, 0.5);
+            color: #94a3b8;
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+        }
+        
+        .gender-option:hover .gender-icon {
+            background: rgba(71, 85, 105, 0.7);
+        }
+        
+        .gender-option input:checked + .gender-icon {
+            border-color: #3b82f6;
+            box-shadow: 0 0 8px rgba(59, 130, 246, 0.4);
+        }
+        
+        .gender-option input[value="male"]:checked + .gender-icon {
+            color: #3b82f6;
+            background: rgba(59, 130, 246, 0.2);
+        }
+        
+        .gender-option input[value="female"]:checked + .gender-icon {
+            color: #ec4899;
+            background: rgba(236, 72, 153, 0.2);
+        }
+        
+        .comment-text-row {
+            display: flex;
+            gap: 0.8rem;
+        }
+        
+        .comment-input {
+            flex: 1;
+            padding: 0.8rem 1rem;
+            border: 2px solid rgba(59, 130, 246, 0.3);
+            border-radius: 10px;
+            background: rgba(15, 23, 42, 0.6);
+            color: #f1f5f9;
+            font-size: 0.95rem;
+            transition: all 0.3s ease;
+        }
+        
+        .comment-input::placeholder {
+            color: #64748b;
+        }
+        
+        .comment-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.3);
+        }
+        
+        .comment-submit-btn {
+            padding: 0.8rem 1.5rem;
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .comment-submit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4);
+            background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%);
+        }
+        
+        @media (max-width: 768px) {
+            .comment-section {
+                margin: 1rem;
+                padding: 1.5rem;
+            }
+            
+            .comment-text-row {
+                flex-direction: column;
+            }
+            
+            .comment-submit-btn {
+                width: 100%;
+                justify-content: center;
+            }
+        }
+            /* 主题切换器样式 */
+        .theme-switcher {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            display: flex;
+            gap: 0.5rem;
+            z-index: 10;
+        }
+        
+        .theme-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(8px);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 1rem;
+        }
+        
+        .theme-btn:hover {
+            transform: scale(1.1);
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.5);
+            color: white;
+        }
+        
+        .theme-btn.active {
+            background: linear-gradient(135deg, rgba(212, 167, 106, 0.5), rgba(230, 190, 130, 0.4));
+            border-color: rgba(255, 220, 160, 0.8);
+            color: white;
+            box-shadow: 0 0 15px rgba(255, 220, 160, 0.4);
+        }
+        
+        /* 主题配色系统 - 内联覆盖 */
+        :root {
+            --bg-gradient-1: rgba(165, 243, 252, 0.25);
+            --bg-gradient-2: rgba(216, 180, 254, 0.2);
+            --bg-gradient-3: rgba(251, 207, 232, 0.15);
+            --bg-base-1: rgba(15, 23, 42, 0.95);
+            --bg-base-2: rgba(30, 27, 75, 0.92);
+        }
+        
+        /* 深海蓝主题 */
+        [data-theme="ocean"] {
+            --bg-gradient-1: rgba(56, 189, 248, 0.35);
+            --bg-gradient-2: rgba(59, 130, 246, 0.3);
+            --bg-gradient-3: rgba(14, 165, 233, 0.25);
+            --bg-base-1: rgba(3, 25, 50, 0.95);
+            --bg-base-2: rgba(7, 40, 80, 0.92);
+        }
+        
+        /* 落日橙主题 */
+        [data-theme="sunset"] {
+            --bg-gradient-1: rgba(251, 146, 60, 0.35);
+            --bg-gradient-2: rgba(239, 68, 68, 0.3);
+            --bg-gradient-3: rgba(245, 158, 11, 0.25);
+            --bg-base-1: rgba(60, 20, 10, 0.95);
+            --bg-base-2: rgba(90, 30, 15, 0.92);
+        }
+        
+        /* 森林绿主题 */
+        [data-theme="forest"] {
+            --bg-gradient-1: rgba(74, 222, 128, 0.35);
+            --bg-gradient-2: rgba(34, 197, 94, 0.3);
+            --bg-gradient-3: rgba(16, 185, 129, 0.25);
+            --bg-base-1: rgba(10, 40, 20, 0.95);
+            --bg-base-2: rgba(15, 60, 30, 0.92);
+        }
+        
+        /* 星空紫主题 */
+        [data-theme="galaxy"] {
+            --bg-gradient-1: rgba(192, 132, 252, 0.35);
+            --bg-gradient-2: rgba(139, 92, 246, 0.3);
+            --bg-gradient-3: rgba(124, 58, 237, 0.25);
+            --bg-base-1: rgba(30, 10, 50, 0.95);
+            --bg-base-2: rgba(50, 15, 80, 0.92);
+        }
+        
+        /* 动态背景应用 */
+        body {
+            background: 
+                radial-gradient(ellipse at 20% 20%, var(--bg-gradient-1) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 80%, var(--bg-gradient-2) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 50%, var(--bg-gradient-3) 0%, transparent 60%),
+                linear-gradient(135deg, var(--bg-base-1) 0%, var(--bg-base-2) 50%, var(--bg-base-1) 100%) !important;
+            background-attachment: fixed !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="home-page" class="page active">
+        <header class="app-header">
+            <h1><i class="fas fa-bolt"></i> 雷霆中国象棋</h1>
+            <p class="subtitle">经典对弈 • 雷霆AI</p>
+            <!-- 主题切换器 -->
+            <div class="theme-switcher">
+                <button class="theme-btn active" data-theme="default" title="默认主题">
+                    <i class="fas fa-palette"></i>
+                </button>
+                <button class="theme-btn" data-theme="ocean" title="深海蓝">
+                    <i class="fas fa-water"></i>
+                </button>
+                <button class="theme-btn" data-theme="sunset" title="落日橙">
+                    <i class="fas fa-sun"></i>
+                </button>
+                <button class="theme-btn" data-theme="forest" title="森林绿">
+                    <i class="fas fa-leaf"></i>
+                </button>
+                <button class="theme-btn" data-theme="galaxy" title="星空紫">
+                    <i class="fas fa-star"></i>
+                </button>
+            </div>
+        </header>
+        
+        <main class="home-content">
+            <!-- 主页诗句（横排） -->
+            <div class="home-poem">
+                <div class="poem-horizontal">
+                    <div class="poem-line">能使寸心远千里</div>
+                    <div class="poem-line">角弓百步可穿杨</div>
+                </div>
+                <div class="poem-separator"></div>
+                <div class="poem-horizontal">
+                    <div class="poem-line">九十之路横还纵</div>
+                    <div class="poem-line">三十二子定低昂</div>
+                </div>
+            </div>
+            
+            <div class="mode-selection">
+                <h2><i class="fas fa-gamepad"></i> 选择对战模式</h2>
+                <div class="mode-options">
+                    <div class="mode-option active" data-mode="pvp">
+                        <i class="fas fa-users"></i>
+                        <h3>人人对战</h3>
+                        <p>与朋友同机对战，轮流操作</p>
+                    </div>
+                    <div class="mode-option" data-mode="pve">
+                        <i class="fas fa-robot"></i>
+                        <h3>挑战雷霆AI</h3>
+                        <p>与强大的AI一决高下</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 人机对战模式下选择执棋方 -->
+            <div id="side-selection" class="side-selection" style="display: none;">
+                <h2><i class="fas fa-chess-king"></i> 选择执棋方</h2>
+                <div class="side-options">
+                    <div class="side-option active" data-side="red">
+                        <div class="side-icon red">
+                            <i class="fas fa-chess-king"></i>
+                        </div>
+                        <h3>执红先手</h3>
+                        <p>红方先行，主动进攻</p>
+                    </div>
+                    <div class="side-option" data-side="black">
+                        <div class="side-icon black">
+                            <i class="fas fa-chess-king"></i>
+                        </div>
+                        <h3>执黑后手</h3>
+                        <p>黑方后行，防守反击</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 难度选择（人机对战模式下显示） -->
+            <div id="difficulty-selection" class="difficulty-selection" style="display: none;">
+                <h2><i class="fas fa-layer-group"></i> 选择难度</h2>
+                <div class="difficulty-options">
+                    <div class="difficulty-option active" data-difficulty="beginner">
+                        <div class="difficulty-icon">
+                            <i class="fas fa-baby"></i>
+                        </div>
+                        <h3>幼儿园一霸</h3>
+                        <p>适合初学者，轻松入门</p>
+                        <span class="difficulty-tag easy">初级</span>
+                    </div>
+                    <div class="difficulty-option" data-difficulty="intermediate">
+                        <div class="difficulty-icon">
+                            <i class="fas fa-user-friends"></i>
+                        </div>
+                        <h3>小区扛把子</h3>
+                        <p>有一定棋力，需要思考</p>
+                        <span class="difficulty-tag medium">中级</span>
+                    </div>
+                    <div class="difficulty-option" data-difficulty="advanced">
+                        <div class="difficulty-icon">
+                            <i class="fas fa-trophy"></i>
+                        </div>
+                        <h3>市冠王</h3>
+                        <p>棋力强劲，挑战不小</p>
+                        <span class="difficulty-tag hard">高级</span>
+                    </div>
+                    <div class="difficulty-option" data-difficulty="master">
+                        <div class="difficulty-icon">
+                            <i class="fas fa-crown"></i>
+                        </div>
+                        <h3>神之领域</h3>
+                        <p>顶尖棋力，大师对决</p>
+                        <span class="difficulty-tag expert">特级</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="action-buttons">
+                <button id="start-game" class="btn-primary">
+                    <i class="fas fa-play"></i> 开始游戏
+                </button>
+                <button id="show-rules" class="btn-secondary">
+                    <i class="fas fa-book"></i> 规则说明
+                </button>
+            </div>
+        </main>
+        
+        <!-- 评论系统 -->
+        <div class="comment-section">
+            <h2><i class="fas fa-comments"></i> 棋友评论</h2>
+            <div class="comment-list" id="comment-list">
+                <!-- 评论将动态生成 -->
+            </div>
+            <div class="comment-input-area">
+                <div class="comment-input-row">
+                    <div class="comment-avatar-selector">
+                        <div class="avatar-option active" data-avatar="red" title="红帅">
+                            <span class="avatar-piece red">帅</span>
+                        </div>
+                        <div class="avatar-option" data-avatar="black" title="黑将">
+                            <span class="avatar-piece black">将</span>
+                        </div>
+                    </div>
+                    <div class="comment-gender-selector">
+                        <label class="gender-option">
+                            <input type="radio" name="comment-gender" value="male" checked>
+                            <span class="gender-icon" title="男"><i class="fas fa-mars"></i></span>
+                        </label>
+                        <label class="gender-option">
+                            <input type="radio" name="comment-gender" value="female">
+                            <span class="gender-icon" title="女"><i class="fas fa-venus"></i></span>
+                        </label>
+                    </div>
+                </div>
+                <div class="comment-text-row">
+                    <input type="text" id="comment-input" class="comment-input" placeholder="发表你的评论..." maxlength="100">
+                    <button id="comment-submit" class="comment-submit-btn">
+                        <i class="fas fa-paper-plane"></i> 发送
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <footer class="app-footer">
+            <p>遵循标准中国象棋规则 | 简洁专注 | 雷霆AI引擎</p>
+        </footer>
+    </div>
+    
+    <!-- AI 思考中指示器 -->
+    <div id="ai-thinking-indicator" class="ai-thinking-indicator">
+        <div class="spinner"></div>
+        <p>AI 思考中...</p>
+    </div>
+    
+    <!-- 对战页面 -->
+    <div id="game-page" class="page">
+        <header class="game-header">
+            <div class="game-title">
+                <h2><i class="fas fa-chess-board"></i> 象棋对战</h2>
+                <p id="game-mode-indicator">人人对战</p>
+            </div>
+            <div class="game-controls">
+                <button id="back-to-home" class="btn-icon" title="返回主页面">
+                    <i class="fas fa-home"></i>
+                </button>
+                <button id="toggle-sound" class="btn-icon" title="切换音效">
+                    <i class="fas fa-volume-up"></i>
+                </button>
+            </div>
+        </header>
+        
+        <main class="game-content">
+            <div class="game-sidebar left-sidebar">
+                <div class="player-info red-player">
+                    <div class="player-header">
+                        <div class="player-icon red">
+                            <i class="fas fa-crown"></i>
+                        </div>
+                        <h3>红方</h3>
+                    </div>
+                    <div class="player-status">
+                        <div class="turn-indicator active" id="red-turn">当前回合</div>
+                    </div>
+                    <div class="captured-pieces" id="red-captured">
+                        <p>已吃子：</p>
+                        <div class="captured-list"></div>
+                    </div>
+                </div>
+                
+                <div class="game-controls-panel">
+                    <button id="undo-move" class="game-control-btn">
+                        <i class="fas fa-undo"></i> 悔棋
+                    </button>
+                    <button id="resign-game" class="game-control-btn">
+                        <i class="fas fa-flag"></i> 认输
+                    </button>
+                    <button id="restart-game" class="game-control-btn">
+                        <i class="fas fa-redo"></i> 重新开始
+                    </button>
+                </div>
+            </div>
+            
+            <div class="game-center">
+                <!-- 棋盘上方诗句 -->
+                <div class="poem-above-board">
+                    <div class="poem-line-top">弈棋方寸竞乾坤</div>
+                    <div class="poem-line-top">对局常新战未昏</div>
+                </div>
+                
+                <div class="chessboard-container">
+                    <div class="chessboard" id="chessboard">
+                        <!-- 棋盘和棋子将通过JavaScript动态生成 -->
+                    </div>
+                </div>
+                
+                <!-- 棋盘下方诗句 -->
+                <div class="poem-below-board">
+                    <div class="poem-line-bottom">盘马卧槽双角仕</div>
+                    <div class="poem-line-bottom">横车保帅九宫门</div>
+                </div>
+                
+                <div class="move-history">
+                    <h3><i class="fas fa-history"></i> 走棋记录</h3>
+                    <div class="history-container" id="move-history">
+                        <!-- 走棋记录将动态生成 -->
+                    </div>
+                </div>
+            </div>
+            
+            <div class="game-sidebar right-sidebar">
+                <div class="player-info black-player">
+                    <div class="player-header">
+                        <div class="player-icon black">
+                            <i class="fas fa-chess-king"></i>
+                        </div>
+                        <h3>黑方</h3>
+                    </div>
+                    <div class="player-status">
+                        <div class="turn-indicator" id="black-turn">等待中</div>
+                    </div>
+                    <div class="captured-pieces" id="black-captured">
+                        <p>已吃子：</p>
+                        <div class="captured-list"></div>
+                    </div>
+                </div>
+                
+                <div class="game-status">
+                    <h3><i class="fas fa-info-circle"></i> 游戏状态</h3>
+                    <div class="status-info">
+                        <p>模式: <span id="current-mode">人人对战</span></p>
+                        <p>回合: <span id="current-turn">红方</span></p>
+                        <p>步数: <span id="move-count">0</span></p>
+                        <p>状态: <span id="game-state">进行中</span></p>
+                    </div>
+                    <div class="last-move">
+                        <h4>上一步走棋</h4>
+                        <p id="last-move-text">暂无</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- 规则说明页面 -->
+    <div id="rules-page" class="page">
+        <header class="rules-header">
+            <h2><i class="fas fa-book-open"></i> 中国象棋规则说明</h2>
+            <button id="back-from-rules" class="btn-icon">
+                <i class="fas fa-arrow-left"></i> 返回
+            </button>
+        </header>
+        <main class="rules-content">
+            <div class="rules-container">
+                <h3>基本规则</h3>
+                <p>红黑双方轮流走子，红方先行。目标是将死对方的将（帅）。</p>
+                <h3>棋子走法</h3>
+                <ul>
+                    <li>将/帅：只能在九宫内直行或横走一步。将帅不见面。禁止三连将。</li>
+                    <li>士/仕：只能在九宫内斜行一步。</li>
+                    <li>象/相：走"田"字，不能过河，且"田"字中心不能有子。</li>
+                    <li>马：走"日"字，若前进方向紧邻位置有子则不能走（蹩马腿）。</li>
+                    <li>车：直行或横走任意格，无子阻挡。</li>
+                    <li>炮：移动同车；吃子时，中间必须恰好有一个棋子（炮架）。</li>
+                    <li>兵/卒：未过河前只能向前一步；过河后可向前或左右一步。</li>
+                    <li>( ◜‿◝ )♡ 作者真的好帅 (ಥ﹏ಥ)</li>
+
+                </ul>
+            </div>
+        </main>
+    </div>
+    
+    <!-- 提示弹窗 -->
+    <div id="modal-overlay" class="modal-overlay"></div>
+    <div id="alert-modal" class="modal">
+        <div class="modal-header">
+            <h3 id="alert-title">提示</h3>
+            <button class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p id="alert-message"></p>
+        </div>
+        <div class="modal-footer">
+            <button id="alert-confirm" class="btn-primary">确认</button>
+        </div>
+    </div>
+    
+    <div id="confirm-modal" class="modal">
+        <div class="modal-header">
+            <h3 id="confirm-title">确认</h3>
+            <button class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+            <p id="confirm-message"></p>
+        </div>
+        <div class="modal-footer">
+            <button id="confirm-yes" class="btn-primary">是</button>
+            <button id="confirm-no" class="btn-secondary">否</button>
+        </div>
+    </div>
+    
+    <div id="game-result-modal" class="modal result-modal">
+        <div class="modal-header">
+            <h3 id="result-title">游戏结束</h3>
+        </div>
+        <div class="modal-body">
+            <div class="result-icon">
+                <i id="result-icon" class="fas fa-trophy"></i>
+            </div>
+            <p id="result-message"></p>
+        </div>
+        <div class="modal-footer">
+            <button id="result-new-game" class="btn-primary">新游戏</button>
+            <button id="result-go-home" class="btn-secondary">返回主页</button>
+        </div>
+    </div>
+    
+    <!-- 音频元素 - 中国象棋音效系统 -->
+    <audio id="move-sound" preload="auto">
+        <source src="sounds/move.mp3" type="audio/mpeg">
+    </audio>
+    <audio id="capture-sound" preload="auto">
+        <source src="sounds/capture.mp3" type="audio/mpeg">
+    </audio>
+    <audio id="check-sound" preload="auto">
+        <source src="sounds/check.mp3" type="audio/mpeg">
+    </audio>
+    <audio id="victory-sound" preload="auto">
+        <source src="sounds/victory.mp3" type="audio/mpeg">
+    </audio>
+    <audio id="defeat-sound" preload="auto">
+        <source src="sounds/defeat.mp3" type="audio/mpeg">
+    </audio>
+    <audio id="click-sound" preload="auto">
+        <source src="sounds/click.mp3" type="audio/mpeg">
+    </audio>
+    
+    <!-- 脚本加载顺序很重要：先加载棋库，再加载AI引擎，最后加载主逻辑 -->
+    <script src="opening-book.js"></script>
+    <script src="ai-engine.js"></script>
+    <script src="script.js"></script>
+    
+    <!-- 主题切换系统 -->
+    <script>
+        // 主题切换功能
+        (function() {
+            const themeBtns = document.querySelectorAll('.theme-btn');
+            const body = document.body;
+            
+            // 从本地存储读取主题
+            const savedTheme = localStorage.getItem('thunder-chess-theme') || 'default';
+            if (savedTheme !== 'default') {
+                body.setAttribute('data-theme', savedTheme);
+                themeBtns.forEach(btn => {
+                    btn.classList.toggle('active', btn.dataset.theme === savedTheme);
+                });
+            }
+            
+            // 绑定主题切换事件
+            themeBtns.forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const theme = this.dataset.theme;
+                    
+                    // 更新按钮状态
+                    themeBtns.forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    // 应用主题
+                    if (theme === 'default') {
+                        body.removeAttribute('data-theme');
+                        localStorage.removeItem('thunder-chess-theme');
+                    } else {
+                        body.setAttribute('data-theme', theme);
+                        localStorage.setItem('thunder-chess-theme', theme);
+                    }
+                });
+            });
+        })();
+    </script>
+</body>
+</html>

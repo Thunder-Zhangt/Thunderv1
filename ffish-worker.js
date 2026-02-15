@@ -1,6 +1,6 @@
 /**
- * ffish Worker - 终极修复版
- * 解决动态 import 模块作用域隔离问题
+ * ffish Worker - NNUE 增强版
+ * 支持加载外部 NNUE 神经网络文件
  */
 
 const WORKER_PATH = self.location.pathname;
@@ -14,42 +14,67 @@ console.log('[ffish Worker] JS路径:', FFISH_BASE_PATH);
 let currentBoard = null;
 let isInitialized = false;
 let initError = null;
+let nnueLoaded = false;
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
+ * 加载 NNUE 网络文件
+ */
+async function loadNNUE() {
+    try {
+        const nnuePath = FFISH_BASE_PATH + 'xiangqi-c07e94a5c7cb.nnue';
+        console.log('[ffish Worker] 尝试加载 NNUE:', nnuePath);
+        
+        const response = await fetch(nnuePath);
+        if (!response.ok) {
+            console.warn('[ffish Worker] NNUE 文件未找到，将使用经典评估');
+            return false;
+        }
+        
+        const nnueData = await response.arrayBuffer();
+        console.log('[ffish Worker] NNUE 文件加载成功，大小:', nnueData.byteLength, '字节');
+        
+        // 将 NNUE 数据写入虚拟文件系统
+        if (self.Module && self.Module.FS) {
+            const nnueFilename = 'xiangqi-c07e94a5c7cb.nnue';
+            self.Module.FS.writeFile(nnueFilename, new Uint8Array(nnueData));
+            console.log('[ffish Worker] NNUE 数据已写入虚拟文件系统');
+            
+            // 设置 EvalFile 选项
+            if (self.Module.setEvalFile) {
+                self.Module.setEvalFile(nnueFilename);
+            }
+            
+            nnueLoaded = true;
+            return true;
+        }
+        
+        return false;
+    } catch (error) {
+        console.warn('[ffish Worker] NNUE 加载失败:', error);
+        return false;
+    }
+}
+
+/**
  * 加载 ffish.js 并在全局作用域执行
- * 关键：使用 fetch + eval 确保 Module 是全局变量
  */
 async function loadFfishScript() {
     console.log('[ffish Worker] 开始加载 ffish.js...');
     
-    // ==================== 关键修复：预定义全局 Module ====================
-    // 必须在加载 ffish.js 之前设置，这样 ffish.js 会检测到并使用它
     self.Module = {
-        // 关键：设置正确的脚本目录，这样 locateFile 的第二个参数才正确
         scriptDirectory: FFISH_BASE_PATH,
         
-        // 关键：自定义 locateFile 函数，修正 WASM 路径
         locateFile: function(filename, scriptDir) {
-            console.log('[ffish Worker] locateFile 被调用:');
-            console.log('  - 请求文件:', filename);
-            console.log('  - scriptDir:', scriptDir);
-            
             if (filename.endsWith('.wasm')) {
-                // WASM 文件在 js/ 目录下
-                const wasmPath = FFISH_BASE_PATH + filename;
-                console.log('  - 修正为:', wasmPath);
-                return wasmPath;
+                return FFISH_BASE_PATH + filename;
             }
-            
-            // 其他文件使用默认路径
             return (scriptDir || FFISH_BASE_PATH) + filename;
         },
         
-        // 调试回调
         onRuntimeInitialized: function() {
             console.log('[ffish Worker] ✅ Module runtime initialized');
         },
@@ -59,21 +84,16 @@ async function loadFfishScript() {
             initError = what;
         },
         
-        // 打印调试信息
         print: function(text) {
             console.log('[ffish.js]', text);
         },
+        
         printErr: function(text) {
             console.error('[ffish.js]', text);
         }
     };
-    // =====================================================================
     
     try {
-        // 方法：fetch + eval 在全局作用域执行
-        // 这样 ffish.js 中的 `var Module` 会引用到全局的 self.Module
-        console.log('[ffish Worker] 从路径获取:', FFISH_BASE_PATH + 'ffish.js');
-        
         const response = await fetch(FFISH_BASE_PATH + 'ffish.js');
         
         if (!response.ok) {
@@ -83,21 +103,16 @@ async function loadFfishScript() {
         const scriptText = await response.text();
         console.log('[ffish Worker] 获取成功，脚本大小:', scriptText.length, '字节');
         
-        // 在全局作用域执行脚本
-        // 使用 self.eval 确保在 WorkerGlobalScope 中执行
-        console.log('[ffish Worker] 在全局作用域执行脚本...');
         self.eval(scriptText);
         
         console.log('[ffish Worker] 脚本执行完成');
         console.log('[ffish Worker] self.Module 类型:', typeof self.Module);
         console.log('[ffish Worker] self.Module.Board 类型:', typeof self.Module.Board);
         
-        // 检查是否成功
         if (typeof self.Module.Board === 'function') {
             console.log('[ffish Worker] ✅ ffish.js 加载成功，Board 类已就绪');
             return true;
         } else {
-            // 可能需要等待 WASM 初始化
             console.log('[ffish Worker] Board 类尚未就绪，等待 WASM 初始化...');
             return false;
         }
@@ -109,22 +124,20 @@ async function loadFfishScript() {
 }
 
 /**
- * 等待 ffish 初始化完成（WASM 加载完毕）
+ * 等待 ffish 初始化完成
  */
 async function waitForFfishInit() {
     console.log('[ffish Worker] 等待 ffish 初始化...');
     
     let attempts = 0;
-    const maxAttempts = 200; // 20秒
+    const maxAttempts = 200;
     
     while (attempts < maxAttempts) {
-        // 检查 Module 和 Board 是否就绪
         if (self.Module && typeof self.Module.Board === 'function') {
             console.log(`[ffish Worker] ✅ ffish 初始化完成 (尝试 ${attempts} 次)`);
             return true;
         }
         
-        // 检查是否有错误
         if (initError) {
             console.error('[ffish Worker] 初始化过程中出错:', initError);
             return false;
@@ -133,13 +146,6 @@ async function waitForFfishInit() {
         attempts++;
         if (attempts % 20 === 0) {
             console.log(`[ffish Worker] 等待中... (${attempts}/${maxAttempts})`);
-            // 输出当前状态
-            console.log('  - self.Module:', typeof self.Module);
-            if (self.Module) {
-                console.log('  - self.Module.Board:', typeof self.Module.Board);
-                console.log('  - self.Module.asm:', typeof self.Module.asm);
-                console.log('  - self.Module.ready:', typeof self.Module.ready);
-            }
         }
         
         await sleep(100);
@@ -158,20 +164,19 @@ async function initFfish() {
     
     return new Promise(async (resolve, reject) => {
         try {
-            // 加载脚本
             const loaded = await loadFfishScript();
             
             if (!loaded) {
-                // 需要等待初始化完成
                 const success = await waitForFfishInit();
-                
                 if (!success) {
                     reject(new Error('ffish 引擎初始化失败或超时'));
                     return;
                 }
             }
             
-            // 验证 Board 类
+            // 加载 NNUE 网络
+            await loadNNUE();
+            
             if (typeof self.Module.Board !== 'function') {
                 reject(new Error('Board 类不可用'));
                 return;
@@ -179,6 +184,7 @@ async function initFfish() {
             
             isInitialized = true;
             console.log('[ffish Worker] ✅ ffish 引擎初始化完成');
+            console.log('[ffish Worker] NNUE 状态:', nnueLoaded ? '已加载' : '未加载（使用经典评估）');
             resolve();
             
         } catch (error) {
@@ -197,7 +203,6 @@ function createBoard(fen = null) {
         throw new Error('ffish 引擎尚未初始化');
     }
 
-    // 删除旧棋盘
     if (currentBoard) {
         try {
             currentBoard.delete();
@@ -205,7 +210,6 @@ function createBoard(fen = null) {
         currentBoard = null;
     }
 
-    // 创建新棋盘
     try {
         if (fen) {
             currentBoard = new self.Module.Board("xiangqi", fen);
@@ -220,12 +224,65 @@ function createBoard(fen = null) {
 }
 
 /**
- * 搜索最佳走法
+ * 评估局面 - 使用 NNUE（如果可用）
+ */
+function evaluatePosition(board) {
+    try {
+        // 尝试使用 NNUE 评估
+        if (self.Module.evaluate && nnueLoaded) {
+            return self.Module.evaluate(board);
+        }
+        
+        // 回退到手动评估
+        return manualEvaluate(board);
+    } catch (e) {
+        return manualEvaluate(board);
+    }
+}
+
+/**
+ * 手动评估函数（经典评估）
+ */
+function manualEvaluate(board) {
+    let score = 0;
+    const fen = board.fen();
+    
+    // 子力价值表
+    const pieceValues = {
+        'r': -900, 'R': 900,    // 车
+        'n': -400, 'N': 400,    // 马
+        'b': -200, 'B': 200,    // 象
+        'a': -200, 'A': 200,    // 士
+        'k': -10000, 'K': 10000, // 将/帅
+        'c': -450, 'C': 450,    // 炮
+        'p': -100, 'P': 100     // 兵/卒
+    };
+    
+    // 计算子力价值
+    for (const char of fen.split(' ')[0]) {
+        if (pieceValues[char]) {
+            score += pieceValues[char];
+        }
+    }
+    
+    // 将军加分
+    if (board.isCheck()) {
+        score += 300;
+    }
+    
+    return score;
+}
+
+/**
+ * 搜索最佳走法 - 使用 Minimax + Alpha-Beta
  */
 async function searchBestMove(fen, timeMs) {
     if (!isInitialized) {
         await initFfish();
     }
+
+    const startTime = Date.now();
+    const maxTime = timeMs || 5000;
 
     try {
         const board = createBoard(fen);
@@ -240,20 +297,57 @@ async function searchBestMove(fen, timeMs) {
             }
         }
 
-        // 简单评估选择最佳走法
-        let bestMove = legalMoves[0];
-        let bestScore = -Infinity;
+        // 确定当前方（红方为正，黑方为负）
+        const isRed = fen.includes(' w ');
+        const maximizingPlayer = isRed;
 
-        for (const move of legalMoves) {
-            const score = await evaluateMove(board, move, timeMs / legalMoves.length);
-            if (score > bestScore) {
-                bestScore = score;
-                bestMove = move;
+        let bestMove = legalMoves[0];
+        let bestScore = maximizingPlayer ? -Infinity : Infinity;
+        let depth = 1;
+        const maxDepth = 6;
+
+        // 迭代加深搜索
+        while (depth <= maxDepth && (Date.now() - startTime) < maxTime * 0.8) {
+            let currentBestMove = legalMoves[0];
+            let currentBestScore = maximizingPlayer ? -Infinity : Infinity;
+            
+            for (const move of legalMoves) {
+                // 检查时间
+                if ((Date.now() - startTime) >= maxTime * 0.9) {
+                    break;
+                }
+                
+                const testBoard = new self.Module.Board("xiangqi", board.fen());
+                testBoard.push(move);
+                
+                const score = minimax(testBoard, depth - 1, -Infinity, Infinity, !maximizingPlayer);
+                testBoard.delete();
+                
+                if (maximizingPlayer) {
+                    if (score > currentBestScore) {
+                        currentBestScore = score;
+                        currentBestMove = move;
+                    }
+                } else {
+                    if (score < currentBestScore) {
+                        currentBestScore = score;
+                        currentBestMove = move;
+                    }
+                }
             }
+            
+            bestMove = currentBestMove;
+            bestScore = currentBestScore;
+            
+            console.log(`[ffish Worker] 深度 ${depth} 完成，最佳走法: ${bestMove}, 分数: ${bestScore}`);
+            depth++;
         }
 
         board.delete();
+        
+        console.log(`[ffish Worker] 搜索完成，深度: ${depth - 1}, 最佳走法: ${bestMove}, 分数: ${bestScore}`);
         return { move: bestMove, score: bestScore };
+        
     } catch (error) {
         console.error('[ffish Worker] 搜索错误:', error);
         return { move: null, error: error.message };
@@ -261,35 +355,50 @@ async function searchBestMove(fen, timeMs) {
 }
 
 /**
- * 评估走法
+ * Minimax + Alpha-Beta 剪枝
  */
-async function evaluateMove(board, move, timePerMove) {
-    try {
-        const testBoard = new self.Module.Board("xiangqi", board.fen());
-        testBoard.push(move);
-        
-        let score = Math.random() * 100;
-        
-        try {
-            const lastMove = testBoard.pop();
-            if (lastMove && lastMove.isCapture) {
-                score += 500;
-            }
-        } catch (e) {}
-        
-        if (testBoard.isCheck()) {
-            score += 300;
+function minimax(board, depth, alpha, beta, maximizingPlayer) {
+    // 终止条件
+    if (depth === 0) {
+        return evaluatePosition(board);
+    }
+    
+    const legalMovesStr = board.legalMoves();
+    const legalMoves = legalMovesStr.split(' ').filter(m => m.length > 0);
+    
+    if (legalMoves.length === 0) {
+        if (board.isCheck()) {
+            return maximizingPlayer ? -100000 : 100000;
         }
-        
-        testBoard.delete();
-        
-        if (timePerMove > 10) {
-            await sleep(Math.min(timePerMove, 100));
+        return 0; // 逼和
+    }
+    
+    if (maximizingPlayer) {
+        let maxEval = -Infinity;
+        for (const move of legalMoves) {
+            const testBoard = new self.Module.Board("xiangqi", board.fen());
+            testBoard.push(move);
+            const eval_ = minimax(testBoard, depth - 1, alpha, beta, false);
+            testBoard.delete();
+            
+            maxEval = Math.max(maxEval, eval_);
+            alpha = Math.max(alpha, eval_);
+            if (beta <= alpha) break;
         }
-        
-        return score;
-    } catch (error) {
-        return 0;
+        return maxEval;
+    } else {
+        let minEval = Infinity;
+        for (const move of legalMoves) {
+            const testBoard = new self.Module.Board("xiangqi", board.fen());
+            testBoard.push(move);
+            const eval_ = minimax(testBoard, depth - 1, alpha, beta, true);
+            testBoard.delete();
+            
+            minEval = Math.min(minEval, eval_);
+            beta = Math.min(beta, eval_);
+            if (beta <= alpha) break;
+        }
+        return minEval;
     }
 }
 
@@ -362,7 +471,7 @@ self.onmessage = async function(e) {
         switch (type) {
             case 'init':
                 await initFfish();
-                self.postMessage({ type: 'ready', id });
+                self.postMessage({ type: 'ready', nnueLoaded, id });
                 break;
 
             case 'search':
@@ -372,7 +481,7 @@ self.onmessage = async function(e) {
                 if (searchResult.error) {
                     self.postMessage({ type: 'error', error: searchResult.error, id });
                 } else {
-                    self.postMessage({ type: 'move', move: searchResult.move, id });
+                    self.postMessage({ type: 'move', move: searchResult.move, score: searchResult.score, id });
                 }
                 break;
 
@@ -404,6 +513,7 @@ self.onmessage = async function(e) {
                     currentBoard = null;
                 }
                 isInitialized = false;
+                nnueLoaded = false;
                 initError = null;
                 self.Module = null;
                 self.postMessage({ type: 'terminated', id });
@@ -422,7 +532,7 @@ self.onmessage = async function(e) {
 console.log('[ffish Worker] Worker 已加载，开始自动初始化...');
 initFfish().then(() => {
     console.log('[ffish Worker] ✅ ffish 引擎自动初始化完成');
-    self.postMessage({ type: 'ready' });
+    self.postMessage({ type: 'ready', nnueLoaded });
 }).catch(error => {
     console.error('[ffish Worker] ❌ ffish 引擎自动初始化失败:', error);
     self.postMessage({ type: 'error', error: error.message });

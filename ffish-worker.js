@@ -15,6 +15,7 @@ let currentBoard = null;
 let isInitialized = false;
 let initError = null;
 let nnueLoaded = false;
+let initPromise = null;
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -130,7 +131,7 @@ async function waitForFfishInit() {
     console.log('[ffish Worker] 等待 ffish 初始化...');
     
     let attempts = 0;
-    const maxAttempts = 200;
+    const maxAttempts = 300; // 30秒
     
     while (attempts < maxAttempts) {
         if (self.Module && typeof self.Module.Board === 'function') {
@@ -144,7 +145,7 @@ async function waitForFfishInit() {
         }
         
         attempts++;
-        if (attempts % 20 === 0) {
+        if (attempts % 50 === 0) {
             console.log(`[ffish Worker] 等待中... (${attempts}/${maxAttempts})`);
         }
         
@@ -162,7 +163,10 @@ async function initFfish() {
     if (isInitialized) return Promise.resolve();
     if (initError) return Promise.reject(new Error('初始化已失败: ' + initError));
     
-    return new Promise(async (resolve, reject) => {
+    // 防止重复初始化
+    if (initPromise) return initPromise;
+    
+    initPromise = new Promise(async (resolve, reject) => {
         try {
             const loaded = await loadFfishScript();
             
@@ -193,6 +197,8 @@ async function initFfish() {
             reject(error);
         }
     });
+    
+    return initPromise;
 }
 
 /**
@@ -515,6 +521,7 @@ self.onmessage = async function(e) {
                 isInitialized = false;
                 nnueLoaded = false;
                 initError = null;
+                initPromise = null;
                 self.Module = null;
                 self.postMessage({ type: 'terminated', id });
                 break;
@@ -528,12 +535,5 @@ self.onmessage = async function(e) {
     }
 };
 
-// Worker 加载完成后自动初始化
-console.log('[ffish Worker] Worker 已加载，开始自动初始化...');
-initFfish().then(() => {
-    console.log('[ffish Worker] ✅ ffish 引擎自动初始化完成');
-    self.postMessage({ type: 'ready', nnueLoaded });
-}).catch(error => {
-    console.error('[ffish Worker] ❌ ffish 引擎自动初始化失败:', error);
-    self.postMessage({ type: 'error', error: error.message });
-});
+// 不再自动初始化，等待主线程发送 'init' 消息
+console.log('[ffish Worker] Worker 已加载，等待初始化指令...');

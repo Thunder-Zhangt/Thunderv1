@@ -327,19 +327,19 @@
                 justify-content: center;
             }
         }
-            /* 主题切换器样式 */
+            /* 主题切换器样式 - 响应式布局 */
         .theme-switcher {
-            position: absolute;
-            top: 1rem;
-            right: 1rem;
             display: flex;
             gap: 0.5rem;
             z-index: 10;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin-top: 0.5rem;
         }
         
         .theme-btn {
-            width: 40px;
-            height: 40px;
+            width: 36px;
+            height: 36px;
             border-radius: 50%;
             border: 2px solid rgba(255, 255, 255, 0.3);
             background: rgba(255, 255, 255, 0.1);
@@ -350,7 +350,7 @@
             align-items: center;
             justify-content: center;
             color: rgba(255, 255, 255, 0.7);
-            font-size: 1rem;
+            font-size: 0.9rem;
         }
         
         .theme-btn:hover {
@@ -365,6 +365,14 @@
             border-color: rgba(255, 220, 160, 0.8);
             color: white;
             box-shadow: 0 0 15px rgba(255, 220, 160, 0.4);
+        }
+        
+        /* AI思考提示文字 */
+        .thinking-hint {
+            font-size: 0.75rem;
+            color: rgba(255, 255, 255, 0.6);
+            margin-top: 0.3rem;
+            font-style: italic;
         }
         
         /* 主题配色系统 - 内联覆盖 */
@@ -412,6 +420,15 @@
             --bg-base-2: rgba(50, 15, 80, 0.92);
         }
         
+        /* 卡通粉主题 */
+        [data-theme="pink"] {
+            --bg-gradient-1: rgba(251, 182, 206, 0.35);
+            --bg-gradient-2: rgba(244, 114, 182, 0.3);
+            --bg-gradient-3: rgba(255, 182, 193, 0.25);
+            --bg-base-1: rgba(60, 20, 40, 0.95);
+            --bg-base-2: rgba(80, 30, 55, 0.92);
+        }
+        
         /* 动态背景应用 */
         body {
             background: 
@@ -441,6 +458,9 @@
                 </button>
                 <button class="theme-btn" data-theme="forest" title="森林绿">
                     <i class="fas fa-leaf"></i>
+                </button>
+                <button class="theme-btn" data-theme="pink" title="卡通粉">
+                    <i class="fas fa-heart"></i>
                 </button>
                 <button class="theme-btn" data-theme="galaxy" title="星空紫">
                     <i class="fas fa-star"></i>
@@ -593,6 +613,7 @@
     <div id="ai-thinking-indicator" class="ai-thinking-indicator">
         <div class="spinner"></div>
         <p>AI 思考中...</p>
+        <p class="thinking-hint">（第一次加载时间较长，请耐心等待）</p>
     </div>
     
     <!-- 对战页面 -->

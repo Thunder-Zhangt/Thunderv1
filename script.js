@@ -1,6 +1,6 @@
 /**
  * 中国象棋游戏主逻辑 - 修复版
- * 修复了 ffish Worker 初始化超时问题
+ * 修复了 ffish Worker 初始化问题
  */
 document.addEventListener('DOMContentLoaded', () => {
     const PIECE_CHARS = {
@@ -40,7 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
         difficulty: 'beginner',
         ffishWorker: null,
         ffishAvailable: false,
-        ffishInitPromise: null  // 新增：跟踪初始化 Promise
+        ffishInitPromise: null
     };
     
     const pages = {
@@ -149,11 +149,11 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${fromColChar}${fromRowUCI}${toColChar}${toRowUCI}`;
     }
     
-    // ==================== ffish Worker 管理 - 修复超时问题 ====================
+    // ==================== ffish Worker 管理 - 修复版 ====================
     
     /**
      * 初始化 ffish Worker - 修复版
-     * 增加超时时间到 45 秒，并改进超时逻辑
+     * 创建 Worker 后立即发送 init 消息
      */
     function initFfishWorker() {
         // 如果已经在初始化中，返回现有的 Promise
@@ -173,7 +173,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 let isResolved = false;
                 let timeoutId = null;
                 
-                // 清理函数
                 const cleanup = () => {
                     if (timeoutId) {
                         clearTimeout(timeoutId);
@@ -182,7 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
                 
                 gameState.ffishWorker.onmessage = (e) => {
-                    const { type, error, nnueLoaded } = e.data;
+                    const { type, error, nnueLoaded, id } = e.data;
                     
                     if (type === 'ready') {
                         console.log('[script] ffish Worker 已就绪，NNUE:', nnueLoaded ? '已加载' : '未加载');
@@ -203,20 +202,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     // 不立即标记为失败，等待超时
                 };
                 
-                // 增加到 45 秒超时（给 WASM 足够时间加载）
+                // 立即发送 init 消息，让 Worker 开始初始化
+                gameState.ffishWorker.postMessage({ type: 'init' });
+                
+                // 增加到 60 秒超时（给 WASM 足够时间加载）
                 timeoutId = setTimeout(() => {
                     if (!isResolved) {
                         if (gameState.ffishAvailable) {
                             console.log('[script] ffish Worker 超时检查：实际上已就绪');
                             resolve();
                         } else {
-                            console.warn('[script] ffish Worker 初始化超时（45秒），将使用备用 AI');
+                            console.warn('[script] ffish Worker 初始化超时（60秒），将使用备用 AI');
                             gameState.ffishAvailable = false;
-                            resolve(); // 不回退，让游戏可以继续
+                            resolve();
                         }
                         isResolved = true;
                     }
-                }, 45000);  // 45 秒超时
+                }, 60000);
                 
             } catch (error) {
                 console.error('[script] 创建 Worker 失败:', error);
@@ -880,7 +882,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 const timeoutId = setTimeout(() => {
                     reject(new Error('ffish 搜索超时'));
-                }, timeMs + 10000);  // 给搜索额外 10 秒缓冲
+                }, timeMs + 10000);
                 
                 const messageHandler = (e) => {
                     const { type, move, error, id } = e.data;
